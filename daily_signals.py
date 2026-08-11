@@ -40,7 +40,7 @@ def is_target_time():
 
 WATCHLIST = {
     "Gold": "GC=F",
-    "Oel_WTI": "CL=F",
+    "Oel WTI": "CL=F",
     "Bitcoin": "BTC-USD",
     "Ethereum": "ETH-USD",
     "Tesla": "TSLA",
@@ -161,7 +161,16 @@ def send_telegram(message):
         "parse_mode": "Markdown",
     })
     if resp.status_code != 200:
-        print(f"Fehler beim Senden: {resp.text}")
+        print(f"Fehler beim Senden (Markdown): {resp.text}")
+        print("Versuche erneut ohne Formatierung ...")
+        resp2 = requests.post(url, data={
+            "chat_id": chat_id,
+            "text": message,
+        })
+        if resp2.status_code != 200:
+            print(f"Fehler beim Senden (Klartext): {resp2.text}")
+        else:
+            print("Nachricht (als Klartext) erfolgreich an Telegram gesendet.")
     else:
         print("Nachricht erfolgreich an Telegram gesendet.")
 
