@@ -79,6 +79,11 @@ def analyze(name, ticker):
     if df.empty or len(df) < 30:
         return None
 
+    # Absicherung gegen neuere yfinance-Versionen, die manchmal
+    # mehrdimensionale Spalten zurückgeben (MultiIndex).
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
     close = df["Close"]
     last_close = float(close.iloc[-1])
 
