@@ -1,7 +1,9 @@
-# Daily Market Signal Bot
+# Daytrading Signal Bot
 
-Prüft täglich automatisch Gold, Öl, Bitcoin, Ethereum, Tesla, Nvidia und den S&P 500
-auf RSI-, MACD- und Bollinger-Band-Signale und schickt dir eine Zusammenfassung per Telegram.
+Prüft zweimal täglich (8:00 und 15:30 Uhr deutsche Zeit) automatisch Gold, Öl,
+Bitcoin, Ethereum, Tesla, Nvidia und den S&P 500 auf Basis von 15-Minuten-Kerzen
+auf RSI-, MACD- und Bollinger-Band-Signale und schickt dir eine Zusammenfassung
+per Telegram.
 
 **Wichtig:** Dieser Bot handelt NICHT automatisch. Er liefert nur Informationen/Signale.
 Die Kauf-/Verkaufsentscheidung triffst du selbst.
@@ -40,21 +42,34 @@ erhalten, wenn du den ganzen Ordner ziehst).
 ## 5. Testen
 
 1. Im Repository auf "Actions" gehen
-2. Workflow "Daily Market Signals" auswählen
-3. "Run workflow" klicken (manueller Test)
+2. Workflow "Daytrading Market Signals" auswählen
+3. "Run workflow" klicken (der Haken bei "force_send" ist standardmäßig gesetzt,
+   damit auch außerhalb der Zielzeiten sofort eine Test-Nachricht kommt)
 4. Nach ca. 1 Minute solltest du eine Telegram-Nachricht bekommen
 
-Danach läuft es automatisch jeden Tag um 7:00 Uhr UTC (9:00 Uhr deutsche Sommerzeit).
+Danach läuft es automatisch jeden Tag um 8:00 und 15:30 Uhr deutscher Zeit
+(Sommer- wie Winterzeit werden automatisch berücksichtigt).
 
-## 6. Backtest lokal ausführen (optional, um Strategien zu vergleichen)
+## 6. Backtest ausführen (um Strategien zu vergleichen)
 
+**Über GitHub (empfohlen, kein eigener Rechner nötig):**
+1. Im Repository auf "Actions" gehen
+2. Workflow "Run Backtest" auswählen
+3. "Run workflow" klicken
+4. Nach ein paar Minuten kommt eine Telegram-Nachricht mit den Top-Kombinationen
+5. Die komplette Ergebnistabelle (alle Instrumente/Strategien) kannst du zusätzlich
+   als CSV-Datei herunterladen: auf der Workflow-Run-Seite ganz unten bei
+   "Artifacts" → "backtest-results"
+
+**Lokal (alternativ):**
 ```bash
 pip install -r requirements.txt
 python backtest.py
 ```
 
 Das zeigt dir, welche Strategie (RSI/MACD/Bollinger) auf welchem Instrument in den
-letzten 12 Monaten die beste durchschnittliche Rendite pro Trade gehabt hätte.
+letzten 60 Tagen (15-Minuten-Kerzen, 1 Stunde Haltedauer pro simuliertem Trade)
+die beste durchschnittliche Rendite pro Trade gehabt hätte.
 
 ---
 

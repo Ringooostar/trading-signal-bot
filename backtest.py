@@ -1,16 +1,19 @@
 """
-Backtesting-Skript: Vergleicht RSI-, MACD- und Bollinger-Band-Strategien
-auf einer Watchlist aus Gold, Öl, Krypto und volatilen Aktien.
+Backtesting-Skript für Daytrading: Vergleicht RSI-, MACD- und
+Bollinger-Band-Strategien auf 15-Minuten-Kerzen einer Watchlist aus
+Gold, Öl, Krypto und volatilen Aktien.
 
 Läuft NICHT hier im Sandbox (kein Internetzugriff), sondern auf deinem
-Rechner oder über GitHub Actions.
+Rechner oder über GitHub Actions (siehe .github/workflows/backtest.yml).
 
 Ausführen mit: python backtest.py
 """
 
+import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import requests
 
 # ------------------------------------------------------------------
 # 1. WATCHLIST
@@ -26,8 +29,10 @@ WATCHLIST = {
     "SP500": "^GSPC",
 }
 
-PERIOD = "1y"      # Zeitraum für Backtest
-INTERVAL = "1d"    # Tagesdaten (für Daytrading später auf "1h" oder "15m" umstellen)
+# yfinance erlaubt 15-Minuten-Daten nur für die letzten ca. 60 Tage
+PERIOD = "60d"
+INTERVAL = "15m"
+HOLDING_BARS = 4  # 4 x 15 Min. = 1 Stunde Haltedauer pro simuliertem Trade
 
 
 # ------------------------------------------------------------------
@@ -93,9 +98,10 @@ STRATEGIES = {
 # ------------------------------------------------------------------
 # 4. EINFACHER BACKTEST (Long-only, keine Hebel, keine Gebühren berücksichtigt)
 # ------------------------------------------------------------------
-def backtest_signal(df, signal, holding_days=5):
+def backtest_signal(df, signal, holding_bars=HOLDING_BARS):
     """
-    Simuliert: bei Kaufsignal wird gekauft und nach `holding_days` wieder verkauft.
+    Simuliert: bei Kaufsignal wird gekauft und nach `holding_bars` Kerzen
+    (bei 15-Min.-Kerzen z.B. 4 = 1 Stunde) wieder verkauft.
     Gibt die durchschnittliche Rendite pro Trade zurück.
     """
     returns = []
@@ -103,9 +109,9 @@ def backtest_signal(df, signal, holding_days=5):
     buy_indices = np.where(signal == 1)[0]
 
     for idx in buy_indices:
-        if idx + holding_days < len(close):
+        if idx + holding_bars < len(close):
             entry = close.iloc[idx]
-            exit_ = close.iloc[idx + holding_days]
+            exit_ = close.iloc[idx + holding_bars]
             ret = (exit_ - entry) / entry
             returns.append(ret)
 
@@ -118,6 +124,46 @@ def backtest_signal(df, signal, holding_days=5):
         "avg_return": round(float(returns.mean()) * 100, 2),   # in %
         "win_rate": round(float((returns > 0).mean()) * 100, 1),  # in %
     }
+
+
+def send_telegram(message):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        print("TELEGRAM_BOT_TOKEN oder TELEGRAM_CHAT_ID fehlt. Nachricht nicht gesendet.")
+        return
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    resp = requests.post(url, data={
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "Markdown",
+    })
+    if resp.status_code != 200:
+        print(f"Fehler beim Senden: {resp.text}")
+    else:
+        print("Backtest-Ergebnisse erfolgreich an Telegram gesendet.")
+
+
+def build_telegram_summary(results_df, top_n=8):
+    valid = results_df[results_df["n_trades"] > 0].sort_values(by="avg_return", ascending=False)
+    lines = [f"📈 *Backtest-Ergebnisse (letzte {PERIOD}, 15-Min-Kerzen)*\n"]
+    lines.append(f"Simulierte Haltedauer pro Trade: {HOLDING_BARS * 15} Minuten\n")
+
+    if valid.empty:
+        lines.append("Keine auswertbaren Trades gefunden.")
+    else:
+        lines.append("*Top Kombinationen (Ø Rendite pro Trade):*")
+        for _, row in valid.head(top_n).iterrows():
+            lines.append(
+                f"{row['Instrument']} / {row['Strategie']}: "
+                f"{row['avg_return']}% | Trades: {row['n_trades']} | "
+                f"Trefferquote: {row['win_rate']}%"
+            )
+
+    lines.append("\n_Vergangene Performance ist keine Garantie für die Zukunft. Kein Finanzrat._")
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------
@@ -155,6 +201,9 @@ def main():
 
     results_df.to_csv("backtest_results.csv", index=False)
     print("\nErgebnisse gespeichert in backtest_results.csv")
+
+    summary = build_telegram_summary(results_df)
+    send_telegram(summary)
 
 
 if __name__ == "__main__":

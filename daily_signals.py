@@ -1,10 +1,11 @@
 """
-Tägliches Signal-Skript.
-Prüft die Watchlist auf aktuelle Kauf-/Verkaufssignale und schickt
-eine Zusammenfassung per Telegram.
+Signal-Skript für Daytrading.
+Prüft die Watchlist anhand von 15-Minuten-Kerzen auf aktuelle Kauf-/
+Verkaufssignale und schickt eine Zusammenfassung per Telegram.
 
-Läuft automatisch über GitHub Actions (siehe .github/workflows/daily.yml)
-oder manuell mit: python daily_signals.py
+Läuft automatisch über GitHub Actions zweimal täglich, 8:00 und 15:30 Uhr
+deutscher Zeit (siehe .github/workflows/daily.yml), oder manuell mit:
+python daily_signals.py
 
 Benötigt zwei Umgebungsvariablen (als GitHub Secrets hinterlegen, s. Anleitung):
   TELEGRAM_BOT_TOKEN
@@ -12,10 +13,30 @@ Benötigt zwei Umgebungsvariablen (als GitHub Secrets hinterlegen, s. Anleitung)
 """
 
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
+
+# Uhrzeiten (deutsche Zeit), zu denen tatsächlich gesendet werden soll.
+# GitHub Actions läuft in UTC und kennt keine Sommer-/Winterzeit. Der
+# Workflow (daily.yml) startet daher etwas öfter (rund um beide möglichen
+# UTC-Offsets), und dieser Check lässt nur die Läufe durch, die zeitlich
+# nah genug an 8:00 bzw. 15:30 deutscher Zeit liegen.
+TARGET_TIMES_BERLIN = [(8, 0), (15, 30)]
+TOLERANCE_MINUTES = 20
+
+
+def is_target_time():
+    now = datetime.now(ZoneInfo("Europe/Berlin"))
+    now_minutes = now.hour * 60 + now.minute
+    for h, m in TARGET_TIMES_BERLIN:
+        target_minutes = h * 60 + m
+        if abs(now_minutes - target_minutes) <= TOLERANCE_MINUTES:
+            return True
+    return False
 
 WATCHLIST = {
     "Gold": "GC=F",
@@ -53,7 +74,8 @@ def compute_bollinger(series, period=20, num_std=2):
 
 
 def analyze(name, ticker):
-    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+    # yfinance erlaubt 15m-Daten nur für die letzten ca. 60 Tage
+    df = yf.download(ticker, period="5d", interval="15m", progress=False)
     if df.empty or len(df) < 30:
         return None
 
@@ -98,7 +120,7 @@ def analyze(name, ticker):
 
 
 def build_message(results):
-    lines = ["📊 *Tägliches Markt-Update*\n"]
+    lines = ["📊 *Daytrading Markt-Update (15-Min-Basis)*\n"]
     any_signal = False
 
     for r in results:
@@ -140,6 +162,12 @@ def send_telegram(message):
 
 
 def main():
+    force_send = os.environ.get("FORCE_SEND") == "true"
+    if not force_send and not is_target_time():
+        print("Außerhalb der Zielzeiten (8:00 / 15:30 Uhr deutsche Zeit) — kein Versand.")
+        print("(Für einen manuellen Test unabhängig von der Uhrzeit: FORCE_SEND=true setzen)")
+        return
+
     results = []
     for name, ticker in WATCHLIST.items():
         try:
