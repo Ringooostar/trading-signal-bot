@@ -34,6 +34,11 @@ PERIOD = "60d"
 INTERVAL = "15m"
 HOLDING_BARS = 4  # 4 x 15 Min. = 1 Stunde Haltedauer pro simuliertem Trade
 
+# Geschätzte Kosten pro Trade (Kauf + Verkauf zusammen), realistisch für
+# Krypto-/CFD-Broker mit Spread + Gebühren. Passe das an deinen tatsächlichen
+# Broker an, falls du genauere Zahlen hast.
+TRANSACTION_COST_PCT = 0.10  # in Prozent, z.B. 0.10 = 0,10% pro Trade (Round-Trip)
+
 
 # ------------------------------------------------------------------
 # 2. INDIKATOREN
@@ -88,31 +93,50 @@ def strategy_bollinger(df):
     return pd.Series(signal, index=df.index)
 
 
+def strategy_combined(df):
+    """
+    Strengere Strategie: Es wird nur gehandelt, wenn mindestens 2 von 3
+    Indikatoren (RSI, MACD, Bollinger) gleichzeitig in dieselbe Richtung
+    zeigen. Soll seltenere, aber "überzeugendere" Signale liefern.
+    """
+    rsi_sig = strategy_rsi(df)
+    macd_sig = strategy_macd(df)
+    boll_sig = strategy_bollinger(df)
+
+    total = rsi_sig + macd_sig + boll_sig
+    # +2 oder +3 => mind. 2 Indikatoren sagen "Kaufen"
+    signal = np.where(total >= 2, 1, np.where(total <= -2, -1, 0))
+    return pd.Series(signal, index=df.index)
+
+
 STRATEGIES = {
     "RSI": strategy_rsi,
     "MACD": strategy_macd,
     "Bollinger": strategy_bollinger,
+    "Kombi (2 von 3)": strategy_combined,
 }
 
 
 # ------------------------------------------------------------------
 # 4. EINFACHER BACKTEST (Long-only, keine Hebel, keine Gebühren berücksichtigt)
 # ------------------------------------------------------------------
-def backtest_signal(df, signal, holding_bars=HOLDING_BARS):
+def backtest_signal(df, signal, holding_bars=HOLDING_BARS, cost_pct=TRANSACTION_COST_PCT):
     """
     Simuliert: bei Kaufsignal wird gekauft und nach `holding_bars` Kerzen
     (bei 15-Min.-Kerzen z.B. 4 = 1 Stunde) wieder verkauft.
-    Gibt die durchschnittliche Rendite pro Trade zurück.
+    Zieht geschätzte Handelskosten (`cost_pct`, Round-Trip) von jedem
+    Trade ab. Gibt die durchschnittliche Netto-Rendite pro Trade zurück.
     """
     returns = []
     close = df["Close"]
     buy_indices = np.where(signal == 1)[0]
+    cost_fraction = cost_pct / 100
 
     for idx in buy_indices:
         if idx + holding_bars < len(close):
             entry = close.iloc[idx]
             exit_ = close.iloc[idx + holding_bars]
-            ret = (exit_ - entry) / entry
+            ret = (exit_ - entry) / entry - cost_fraction
             returns.append(ret)
 
     if not returns:
@@ -158,7 +182,8 @@ def send_telegram(message):
 def build_telegram_summary(results_df, top_n=8):
     valid = results_df[results_df["n_trades"] > 0].sort_values(by="avg_return", ascending=False)
     lines = [f"📈 *Backtest-Ergebnisse (letzte {PERIOD}, 15-Min-Kerzen)*\n"]
-    lines.append(f"Simulierte Haltedauer pro Trade: {HOLDING_BARS * 15} Minuten\n")
+    lines.append(f"Haltedauer/Trade: {HOLDING_BARS * 15} Min. | "
+                 f"Kosten/Trade bereits abgezogen: {TRANSACTION_COST_PCT}%\n")
 
     if valid.empty:
         lines.append("Keine auswertbaren Trades gefunden.")
