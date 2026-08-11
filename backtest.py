@@ -1,3 +1,4 @@
+
 """
 Backtesting-Skript für Daytrading: Vergleicht RSI-, MACD- und
 Bollinger-Band-Strategien auf 15-Minuten-Kerzen einer Watchlist aus
@@ -183,6 +184,11 @@ def main():
         if df.empty or len(df) < 50:
             print(f"  Zu wenig Daten für {name}, überspringe.")
             continue
+
+        # Absicherung gegen neuere yfinance-Versionen, die manchmal
+        # mehrdimensionale Spalten zurückgeben (MultiIndex).
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
         for strat_name, strat_func in STRATEGIES.items():
             signal = strat_func(df)
