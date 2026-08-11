@@ -101,44 +101,63 @@ def analyze(name, ticker):
     last_lower = float(lower.iloc[-1])
 
     signals = []
+    score = 0  # positive Zahl = mehrere Indikatoren zeigen "Kaufen", negativ = "Verkaufen"
+
     if last_rsi < 30:
-        signals.append("RSI überverkauft (mögliches Kaufsignal)")
+        signals.append("RSI überverkauft (Kauf)")
+        score += 1
     elif last_rsi > 70:
-        signals.append("RSI überkauft (mögliches Verkaufsignal)")
+        signals.append("RSI überkauft (Verkauf)")
+        score -= 1
 
     if macd_cross_up:
-        signals.append("MACD Bullish Crossover (mögliches Kaufsignal)")
+        signals.append("MACD Bullish Crossover (Kauf)")
+        score += 1
     elif macd_cross_down:
-        signals.append("MACD Bearish Crossover (mögliches Verkaufsignal)")
+        signals.append("MACD Bearish Crossover (Verkauf)")
+        score -= 1
 
     if last_close < last_lower:
-        signals.append("Kurs unter unterem Bollinger Band (mögliches Kaufsignal)")
+        signals.append("Kurs unter unterem Bollinger Band (Kauf)")
+        score += 1
     elif last_close > last_upper:
-        signals.append("Kurs über oberem Bollinger Band (mögliches Verkaufsignal)")
+        signals.append("Kurs über oberem Bollinger Band (Verkauf)")
+        score -= 1
+
+    is_strong = abs(score) >= 2  # mind. 2 von 3 Indikatoren stimmen überein
 
     return {
         "name": name,
         "close": round(last_close, 2),
         "rsi": round(last_rsi, 1),
         "signals": signals,
+        "is_strong": is_strong,
     }
 
 
 def build_message(results):
     lines = ["📊 *Daytrading Markt-Update (15-Min-Basis)*\n"]
-    any_signal = False
 
-    for r in results:
-        if r is None:
-            continue
-        if r["signals"]:
-            any_signal = True
+    strong = [r for r in results if r and r["signals"] and r["is_strong"]]
+    weak = [r for r in results if r and r["signals"] and not r["is_strong"]]
+
+    if strong:
+        lines.append("🔥 *Starke Signale (2+ Indikatoren stimmen überein):*")
+        for r in strong:
             lines.append(f"*{r['name']}* — Kurs: {r['close']} | RSI: {r['rsi']}")
             for s in r["signals"]:
                 lines.append(f"  ⚡ {s}")
             lines.append("")
 
-    if not any_signal:
+    if weak:
+        lines.append("_Schwächere Einzelsignale:_")
+        for r in weak:
+            lines.append(f"{r['name']} — Kurs: {r['close']} | RSI: {r['rsi']}")
+            for s in r["signals"]:
+                lines.append(f"  · {s}")
+            lines.append("")
+
+    if not strong and not weak:
         lines.append("Keine auffälligen Signale heute. Alle Werte im neutralen Bereich.")
 
     lines.append("\n_Kein Finanzrat. Nur automatisierte technische Analyse._")
