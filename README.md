@@ -67,9 +67,15 @@ pip install -r requirements.txt
 python backtest.py
 ```
 
-Das zeigt dir, welche Strategie (RSI/MACD/Bollinger) auf welchem Instrument in den
+Das zeigt dir, welche Strategie (RSI/MACD/Bollinger/Kombi) auf welchem Instrument in den
 letzten 60 Tagen (15-Minuten-Kerzen, 1 Stunde Haltedauer pro simuliertem Trade)
-die beste durchschnittliche Rendite pro Trade gehabt hätte.
+die beste durchschnittliche **Netto**-Rendite pro Trade gehabt hätte — geschätzte
+Handelskosten (Standard: 0,10% pro Trade, Round-Trip) sind bereits abgezogen. Diesen
+Wert kannst du in `backtest.py` bei `TRANSACTION_COST_PCT` an deinen echten Broker anpassen.
+
+Die Strategie "Kombi (2 von 3)" handelt nur, wenn mindestens zwei der drei Indikatoren
+gleichzeitig übereinstimmen — seltenere, aber potenziell verlässlichere Signale.
+Das tägliche Signal-Skript markiert solche Übereinstimmungen ebenfalls als "🔥 Starkes Signal".
 
 ---
 

@@ -7,13 +7,19 @@ Läuft automatisch über GitHub Actions zweimal täglich, 8:00 und 15:30 Uhr
 deutscher Zeit (siehe .github/workflows/daily.yml), oder manuell mit:
 python daily_signals.py
 
+Da geplante GitHub-Actions-Läufe oft verspätet starten, wird nicht streng
+auf ein Zeitfenster geprüft, sondern in state/last_sent.json gemerkt, für
+welche Zielzeit heute schon gesendet wurde (siehe get_due_slot()).
+
 Benötigt zwei Umgebungsvariablen (als GitHub Secrets hinterlegen, s. Anleitung):
   TELEGRAM_BOT_TOKEN
   TELEGRAM_CHAT_ID
 """
 
 import os
+import json
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas as pd
@@ -23,20 +29,61 @@ import requests
 # Uhrzeiten (deutsche Zeit), zu denen tatsächlich gesendet werden soll.
 # GitHub Actions läuft in UTC und kennt keine Sommer-/Winterzeit. Der
 # Workflow (daily.yml) startet daher etwas öfter (rund um beide möglichen
-# UTC-Offsets), und dieser Check lässt nur die Läufe durch, die zeitlich
-# nah genug an 8:00 bzw. 15:30 deutscher Zeit liegen.
+# UTC-Offsets). Zusätzlich starten geplante GitHub-Actions-Läufe oft mit
+# spürbarer Verspätung (teils über eine Stunde). Statt eines starren
+# Zeitfensters merkt sich dieses Skript deshalb in einer kleinen
+# Statusdatei (state/last_sent.json), für welche Zielzeit heute schon
+# gesendet wurde. Der erste Lauf NACH einer Zielzeit sendet dann,
+# unabhängig davon, wie stark er verspätet ist; alle weiteren Läufe für
+# dieselbe Zielzeit am selben Tag werden übersprungen.
 TARGET_TIMES_BERLIN = [(8, 0), (15, 30)]
-TOLERANCE_MINUTES = 20
+STATE_FILE = Path(__file__).parent / "state" / "last_sent.json"
 
 
-def is_target_time():
+def _slot_label(h, m):
+    return f"{h:02d}:{m:02d}"
+
+
+def _load_state():
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_state(today_str, sent_slots):
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Es wird nur der heutige Tag gespeichert, damit die Datei klein bleibt.
+    STATE_FILE.write_text(json.dumps({today_str: sent_slots}))
+
+
+def get_due_slot():
+    """
+    Gibt die Zielzeit (z. B. "08:00") zurück, für die heute noch gesendet
+    werden muss, oder None, wenn gerade nichts fällig ist. Ist mehr als
+    eine Zielzeit bereits verstrichen und ungesendet (z. B. nach einer
+    Pause), wird nur die zeitlich jüngste davon zurückgegeben.
+    """
     now = datetime.now(ZoneInfo("Europe/Berlin"))
+    today_str = now.date().isoformat()
+    state = _load_state()
+    sent_today = state.get(today_str, [])
     now_minutes = now.hour * 60 + now.minute
-    for h, m in TARGET_TIMES_BERLIN:
+
+    due = None
+    for h, m in sorted(TARGET_TIMES_BERLIN):
+        label = _slot_label(h, m)
         target_minutes = h * 60 + m
-        if abs(now_minutes - target_minutes) <= TOLERANCE_MINUTES:
-            return True
-    return False
+        if now_minutes >= target_minutes and label not in sent_today:
+            due = label
+    return due, today_str, sent_today
+
+
+def mark_slot_sent(today_str, sent_today, slot_label):
+    sent_today = sent_today + [slot_label]
+    _save_state(today_str, sent_today)
 
 WATCHLIST = {
     "Gold": "GC=F",
@@ -196,10 +243,18 @@ def send_telegram(message):
 
 def main():
     force_send = os.environ.get("FORCE_SEND") == "true"
-    if not force_send and not is_target_time():
-        print("Außerhalb der Zielzeiten (8:00 / 15:30 Uhr deutsche Zeit) — kein Versand.")
-        print("(Für einen manuellen Test unabhängig von der Uhrzeit: FORCE_SEND=true setzen)")
+    due_slot, today_str, sent_today = get_due_slot()
+
+    if not force_send and due_slot is None:
+        print("Für heute wurde bereits für alle fälligen Zielzeiten gesendet, "
+              "oder die erste Zielzeit (8:00 Uhr) steht noch aus — kein Versand.")
+        print("(Für einen manuellen Test unabhängig von Uhrzeit/Status: FORCE_SEND=true setzen)")
         return
+
+    if force_send:
+        print("FORCE_SEND aktiv — sende unabhängig von Uhrzeit und Sende-Status.")
+    else:
+        print(f"Zielzeit {due_slot} Uhr ist fällig und wurde heute noch nicht gesendet — sende jetzt.")
 
     results = []
     for name, ticker in WATCHLIST.items():
@@ -211,6 +266,11 @@ def main():
     message = build_message(results)
     print(message)
     send_telegram(message)
+
+    # Sende-Status nur bei echten (nicht erzwungenen) Läufen aktualisieren,
+    # damit Testläufe die nächste reguläre Sendung nicht blockieren.
+    if not force_send:
+        mark_slot_sent(today_str, sent_today, due_slot)
 
 
 if __name__ == "__main__":
