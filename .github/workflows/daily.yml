@@ -2,16 +2,27 @@ name: Daytrading Market Signals
 
 on:
   schedule:
+    # Ziel: 8:00 und 15:30 Uhr deutsche Zeit.
+    # Deutschland wechselt zwischen Sommerzeit (UTC+2) und Winterzeit (UTC+1),
+    # cron kennt keine Zeitzonen — daher starten wir für beide Zielzeiten
+    # jeweils zu beiden möglichen UTC-Zeitpunkten. Das Python-Skript prüft
+    # anhand von state/last_sent.json selbst, ob für die jeweils fällige
+    # Zielzeit heute schon gesendet wurde, und sendet nur dann, wenn nicht —
+    # auch wenn dieser Lauf (z. B. durch GitHub-Verspätung) nicht exakt zur
+    # Zielzeit startet.
     - cron: '0 6 * * *'   # 8:00 Uhr Sommerzeit
     - cron: '0 7 * * *'   # 8:00 Uhr Winterzeit
     - cron: '30 13 * * *' # 15:30 Uhr Sommerzeit
     - cron: '30 14 * * *' # 15:30 Uhr Winterzeit
-  workflow_dispatch:
+  workflow_dispatch:  # erlaubt manuelles Starten über den "Run workflow" Button
     inputs:
       force_send:
         description: 'Nachricht unabhängig von der Uhrzeit senden (zum Testen)'
         type: boolean
         default: true
+
+permissions:
+  contents: write  # nötig, damit der Workflow state/last_sent.json zurück ins Repo committen kann
 
 jobs:
   run-signals:
@@ -34,3 +45,16 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE_SEND: ${{ github.event.inputs.force_send || 'false' }}
         run: python daily_signals.py
+
+      - name: Sende-Status speichern
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state/last_sent.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add state/last_sent.json
+            git commit -m "Sende-Status aktualisieren [skip ci]"
+            git push
+          else
+            echo "Kein Sende-Status-Update nötig."
+          fi
